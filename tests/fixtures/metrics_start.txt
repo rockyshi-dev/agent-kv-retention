@@ -1,0 +1,11 @@
+# HELP vllm:cache_config_info Information of the LLMEngine CacheConfig
+# TYPE vllm:cache_config_info gauge
+vllm:cache_config_info{_block_size_resolved="True",block_size="16",cache_dtype="auto",enable_prefix_caching="True",engine="0",gpu_memory_utilization="0.92",kv_cache_size_tokens="118080",kv_offloading_backend="native",num_cpu_blocks="None",num_gpu_blocks="7380",prefix_caching_hash_algo="sha256"} 1.0
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="/models/Qwen2.5-7B-Instruct"} 0.0
+vllm:num_requests_waiting{engine="0",model_name="/models/Qwen2.5-7B-Instruct"} 0.0
+vllm:prefix_cache_queries_total{engine="0",model_name="/models/Qwen2.5-7B-Instruct"} 0.0
+vllm:prefix_cache_hits_total{engine="0",model_name="/models/Qwen2.5-7B-Instruct"} 0.0
+vllm:external_prefix_cache_hits_total{engine="0",model_name="/models/Qwen2.5-7B-Instruct"} 0.0
+vllm:request_success_total{engine="0",finished_reason="stop",model_name="/models/Qwen2.5-7B-Instruct"} 0.0
+vllm:request_success_total{engine="0",finished_reason="length",model_name="/models/Qwen2.5-7B-Instruct"} 0.0

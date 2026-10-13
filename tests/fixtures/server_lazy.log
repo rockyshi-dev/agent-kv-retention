@@ -1,0 +1,5 @@
+(EngineCore pid=2002) INFO 10-04 23:32:41 [utils.py:320] Using LBNHC KV cache layout.
+(EngineCore pid=2002) INFO 10-04 23:32:47 [kv_cache_utils.py:2395] GPU KV cache size: 118,080 tokens, Maximum concurrency for 32,768 tokens per request: 3.60x
+(EngineCore pid=2002) INFO 10-04 23:32:47 [factory.py:62] Creating v1 connector with name: SimpleCPUOffloadConnector and engine_id: 3ded435a-c7c0-4d28-bf9e-afffa37f6050
+(EngineCore pid=2002) INFO 10-04 23:32:47 [simple_cpu_offload_connector.py:139] SimpleCPUOffloadConnector: role=WORKER, per_rank=16.00 GB, world_size=1, mode=lazy, backend=cpu, disk=none
+(APIServer pid=2001) WARNING 10-04 23:33:01 [model.py:1772] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'repetition_penalty': 1.05, 'temperature': 0.7, 'top_k': 20, 'top_p': 0.8}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.

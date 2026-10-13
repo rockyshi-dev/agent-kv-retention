@@ -1,0 +1,5 @@
+(APIServer pid=1001) INFO 10-04 23:42:51 [api_utils.py:286] non-default args: {'model_tag': '/models/Qwen2.5-7B-Instruct', 'port': 8066, 'model': '/models/Qwen2.5-7B-Instruct'}
+(EngineCore pid=1002) INFO 10-04 23:43:08 [utils.py:320] Using LBHNC KV cache layout.
+(EngineCore pid=1002) INFO 10-04 23:43:14 [kv_cache_utils.py:2395] GPU KV cache size: 118,080 tokens, Maximum concurrency for 32,768 tokens per request: 3.60x
+(EngineCore pid=1002) INFO 10-04 23:43:14 [factory.py:62] Creating v1 connector with name: OffloadingConnector and engine_id: f73749dd-d624-44c3-8cc8-841aa8383583
+(APIServer pid=1001) WARNING 10-04 23:43:28 [model.py:1772] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'repetition_penalty': 1.05, 'temperature': 0.7, 'top_k': 20, 'top_p': 0.8}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
