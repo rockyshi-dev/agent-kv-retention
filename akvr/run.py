@@ -8,7 +8,7 @@ import sys
 import time
 
 from .client import Client, Filler
-from .gates import compute, quiet, session_gates, start_gate
+from .gates import compute, first_difference, quiet, session_gates, start_gate
 from .server import Locks, Server, ShutdownError, run_identity, topology, verify_start_tests
 from .sessions import validate
 from .spec import (CLOSING, GENERATED, GROUPS, LEVELS, QUIET_ATTEMPTS, RESUME_OUTPUT, RESUME_WAIT_S, ROUNDS,
@@ -29,22 +29,27 @@ class ArmFailure(RuntimeError):
 
 
 def session(client, filler, material, arm, pool, directory, generated):
-    """Turn 1, eviction (all arms but KEEP), a 2 s wait, then the timed resume request."""
+    """Turn 1, eviction (all arms but KEEP), a 2 s wait, then the timed resume request.
+
+    The generated turn is fixed in length (512 ids), not in content: each arm's own server
+    generates it, and the resume request is built from that arm's ids. For information only,
+    `generated` keeps the first arm's ids per session (the base arm), so that every later row
+    records whether, and from which position, its ids differ from the base arm's.
+    """
     row = {k: material[k] for k in ('id', 'round', 'N', 'index', 'warmup', 'text_sha256')}
     row['arm'] = arm
     row['turn1'] = client.request(material['prompt_ids'], GENERATED, force=True)
+    row['turn1_prefix_cache_hits'] = (row['turn1'].get('delta') or {}).get('prefix_cache_hits')
     ids = row['turn1'].get('token_ids')
     if not isinstance(ids, list) or len(ids) != GENERATED:
         row['gates'] = session_gates(row)
         append(directory / 'sessions.jsonl', row)
         return row
     identity = hashlib.sha256(json.dumps(ids, separators=(',', ':')).encode()).hexdigest()
-    if material['id'] in generated and generated[material['id']] != identity:
-        append(directory / 'sessions.jsonl', row | {'error': 'Fixed generated turn differs across arms',
-            'expected_generated_sha256': generated[material['id']], 'generated_sha256': identity})
-        raise ArmFailure('Generated 512-token turn changed between arms')
-    generated[material['id']] = identity
+    base = generated.setdefault(material['id'], {'arm': arm, 'sha256': identity, 'ids': list(ids)})
     row['generated_sha256'] = identity
+    row['base_arm'] = base['arm']
+    row['first_diff_from_base'] = first_difference(ids, base['ids'])
     row['filler_tokens'] = 0
     if arm != 'KEEP':
         row['filler_tokens'] = filler.evict(client, pool,
@@ -177,12 +182,12 @@ def main(args):
             'seed': args.seed, 'port': args.port, 'gpu': args.gpu, 'cache_dir': str(args.cache_dir),
             'locks': [str(gpu_lock), *map(str, args.lock)], 'started_wall_time': time.time()})
         filler = Filler(data['filler_vocabulary'], [s['prompt_ids'][:16] for s in data['sessions']])
-        generated = {}
         starts = prereq['starts'] if prereq else None
         bundle = {'rounds': [], 'manifest': str(output / 'manifest.json')}
         for round_id in range(1 if args.mode == 'start-test' else ROUNDS):
             for attempt in range(1 if args.mode == 'start-test' else QUIET_ATTEMPTS):
                 row = {'round': round_id, 'attempt': attempt, 'starts': {}, 'sessions': []}
+                generated = {}  # turn-1 ids of the first arm per session, this round attempt
                 groups = list(GROUPS)
                 random.Random(args.seed + round_id * 100 + attempt).shuffle(groups)
                 row['group_order'] = groups

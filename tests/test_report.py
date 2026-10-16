@@ -122,6 +122,43 @@ class Report(unittest.TestCase):
             self.assertIn('cells.KEEP/2048.tokens[3].G', text)
             self.assertIn('cells.DROP/8192.median_ttft_ms.2', text)
 
+    def test_turn1_agreement_is_reported_for_information_from_the_sessions_order(self):
+        from akvr.gates import compute
+        with tempfile.TemporaryDirectory() as tmp:
+            data = bundle(.7, raw=True)
+            self.assertTrue(all('arm_order' not in r for r in data['rounds']))  # older records lack it
+            clean = compute(bundle(.7, raw=True))
+            for s in data['rounds'][1]['sessions']:
+                if s['arm'] == 'NATIVE' and s['N'] == 8192 and s['index'] in (2, 4):
+                    s['turn1']['token_ids'] = [17] * 100 + [18] + [17] * 411
+                if s['arm'] == 'LAZY' and s['N'] == 2048 and s['index'] == 1:
+                    s['turn1']['delta'] = {'prefix_cache_hits': 16.0}
+            # In round 2 the DROP arm ran before KEEP on the shared server: the sessions list says so.
+            r2 = data['rounds'][2]['sessions']
+            r2[:] = [s for s in r2 if s['arm'] == 'DROP'] + [s for s in r2 if s['arm'] != 'DROP']
+            run = Path(tmp) / 'run'
+            write_run(run, data)
+            code, text = report(run, '--json', Path(tmp) / 'summary.json')
+            self.assertEqual(code, 0, text)
+            summary = json.loads((Path(tmp) / 'summary.json').read_text())
+            agreement = summary['turn1_agreement_by_round']
+            self.assertEqual(agreement['8192']['1'], {
+                'base_arms': ['KEEP'], 'agree': 14, 'compared': 16, 'turn1_prefix_hits_nonzero': 0, 'sessions': 20,
+                'differing': [{'arm': 'NATIVE', 'index': 2, 'base_arm': 'KEEP', 'first_diff_from_base': 100},
+                              {'arm': 'NATIVE', 'index': 4, 'base_arm': 'KEEP', 'first_diff_from_base': 100}]})
+            self.assertEqual(agreement['2048']['1']['turn1_prefix_hits_nonzero'], 1)
+            self.assertEqual(agreement['2048']['1']['agree'], 16)
+            self.assertEqual(agreement['28672']['2']['base_arms'], ['DROP'])
+            self.assertEqual(agreement['28672']['0']['base_arms'], ['KEEP'])
+            self.assertIn('agreement with the base arm', text)
+            self.assertIn('NATIVE session 2: first token differing from KEEP at position 100', text)
+            # Information only: every existing key of the summary is unchanged.
+            for key in clean:
+                if key != 'turn1_agreement_by_round':
+                    self.assertEqual(summary[key], clean[key], key)
+            self.assertEqual(summary['row'], 'RESTORE-WINS')
+            self.assertIn('Decision row: RESTORE-WINS', text)
+
     def test_missing_run_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             code, text = report(Path(tmp) / 'nothing')

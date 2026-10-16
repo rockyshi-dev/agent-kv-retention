@@ -58,6 +58,48 @@ def start_gate(arm, log, metrics, *, debug_pinning=False, pinning_start=None):
             'pool_bytes': pool * BYTES_PER_TOKEN, 'cache_config': cfg}
 
 
+def first_difference(ids, base):
+    """0-based position of the first token where `ids` differs from `base`; None when they are equal."""
+    for i, (a, b) in enumerate(zip(ids, base)):
+        if a != b:
+            return i
+    return None if len(ids) == len(base) else min(len(ids), len(base))
+
+
+def turn1_agreement(rounds):
+    """Information only: per selected round and level, how many measured sessions generated the same
+    turn-1 ids as the base arm, and how many had turn-1 prefix-cache hits.
+
+    The base arm of a session is the arm of the first row with that session id (and a full
+    512-id turn) in the round's sessions list, which is its execution order. This enters no
+    check, no validity flag and no decision row.
+    """
+    out = {str(n): {} for n in LEVELS}
+    for r in rounds:
+        base = {}
+        for s in r['sessions']:
+            ids = s['turn1'].get('token_ids')
+            if isinstance(ids, list) and len(ids) == GENERATED:
+                base.setdefault(s['id'], s)
+        for n in LEVELS:
+            rows = [s for s in r['sessions'] if not s['warmup'] and s['N'] == n]
+            compared = [s for s in rows if s['id'] in base and base[s['id']] is not s
+                        and isinstance(s['turn1'].get('token_ids'), list)
+                        and len(s['turn1']['token_ids']) == GENERATED]
+            differing = [(s, first_difference(s['turn1']['token_ids'], base[s['id']]['turn1']['token_ids']))
+                         for s in compared]
+            differing = [{'arm': s['arm'], 'index': s['index'], 'base_arm': base[s['id']]['arm'],
+                          'first_diff_from_base': d} for s, d in differing if d is not None]
+            hits = [s for s in rows if isinstance((s['turn1'].get('delta') or {}).get('prefix_cache_hits'), (int, float))
+                    and s['turn1']['delta']['prefix_cache_hits'] > 0]
+            out[str(n)][str(r['round'])] = {
+                'base_arms': sorted({base[s['id']]['arm'] for s in rows if s['id'] in base}),
+                'agree': len(compared) - len(differing), 'compared': len(compared),
+                'differing': differing,
+                'turn1_prefix_hits_nonzero': len(hits), 'sessions': len(rows)}
+    return out
+
+
 def session_gates(record):
     """L, K, E, H and the token counts G, Hh, R of one session."""
     n, arm = record['N'], record['arm']
@@ -243,5 +285,6 @@ def compute(bundle):
             'selected_rounds': sorted(r['round'] for r in selected),
             'examine': examine, 'cells': cells, 'ratios_by_round': ratios,
             'differences_by_round': differences,
+            'turn1_agreement_by_round': turn1_agreement(selected),
             'trace_pool_bytes_by_round': {str(r['round']): r['starts']['KEEP']['pool_bytes'] for r in selected
                                           if r['starts'].get('KEEP', {}).get('pass')}}

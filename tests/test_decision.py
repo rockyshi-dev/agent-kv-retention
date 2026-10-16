@@ -17,6 +17,32 @@ class Arithmetic(unittest.TestCase):
         self.assertEqual(host_min('LAZY', 2048), 1776 - 16)
 
 
+class Turn1Agreement(unittest.TestCase):
+    def test_first_difference(self):
+        self.assertIsNone(gates.first_difference([1, 2, 3], [1, 2, 3]))
+        self.assertEqual(gates.first_difference([1, 2, 3], [1, 9, 3]), 1)
+        self.assertEqual(gates.first_difference([5], [1]), 0)
+        self.assertEqual(gates.first_difference([1, 2], [1, 2, 3]), 2)
+
+    def test_base_is_the_first_full_turn_in_the_sessions_order_and_warmups_are_not_counted(self):
+        data = bundle(.7)
+        rows = data['rounds'][0]['sessions']
+        rows.insert(0, {'id': 'r0-n2048-s0', 'arm': 'KEEP', 'N': 2048, 'round': 0, 'index': 0, 'warmup': True,
+                        'turn1': {'token_ids': [1] * 512}})
+        for s in rows:
+            if s['arm'] == 'KEEP' and s['N'] == 2048 and s['index'] == 1:
+                s['turn1']['token_ids'] = [1] * 100  # too short: neither a base nor compared
+            if s['arm'] == 'DROP' and s['N'] == 2048:
+                s['turn1']['token_ids'] = [17] * 5 + [1] * 507
+        item = gates.turn1_agreement(data['rounds'])['2048']['0']
+        self.assertEqual(item['base_arms'], ['DROP', 'KEEP'])  # session 1's base is DROP, the others' KEEP
+        self.assertEqual((item['sessions'], item['compared'], item['agree']), (20, 15, 9))
+        self.assertEqual([(d['arm'], d['index'], d['base_arm'], d['first_diff_from_base']) for d in item['differing']],
+                         [('DROP', 2, 'KEEP', 5), ('DROP', 3, 'KEEP', 5), ('DROP', 4, 'KEEP', 5),
+                          ('NATIVE', 1, 'DROP', 5), ('NATIVE-ALL', 1, 'DROP', 5), ('LAZY', 1, 'DROP', 5)])
+        self.assertEqual(gates.compute(data)['row'], 'RESTORE-WINS')
+
+
 class Decisions(unittest.TestCase):
     def test_winning_row_requires_every_round_and_both_levels(self):
         data = bundle(.8)

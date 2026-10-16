@@ -61,16 +61,58 @@ class SessionFlow(unittest.TestCase):
         filler.evict.assert_not_called()
         self.assertTrue(row['gates']['K'])
 
-    def test_generated_turn_that_differs_between_arms_skips_resume(self):
+    def test_first_arm_records_itself_as_base_with_its_ids(self):
         client = Mock()
-        client.request.return_value = {'token_ids': [17] * 512}
+        ids = list(range(512))
+        client.request.side_effect = [{'token_ids': ids, 'delta': {'prefix_cache_hits': 0.0}}, {
+            'usage': {'prompt_tokens': 2048}, 'ttft_ms': 90.0,
+            'delta': {'request_success': 1, 'prefix_cache_hits': 0, 'external_prefix_cache_hits': 0}}]
+        generated = {}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(run.time, 'sleep'):
+            row = run.session(client, Mock(evict=Mock(return_value=1)), self.material(), 'DROP', 80000,
+                              Path(tmp), generated)
+            stored = json.loads((Path(tmp) / 'sessions.jsonl').read_text())
+        self.assertEqual(generated['r0-n2048-s1'], {'arm': 'DROP', 'sha256': row['generated_sha256'], 'ids': ids})
+        self.assertEqual((row['base_arm'], row['first_diff_from_base'], row['turn1_prefix_cache_hits']),
+                         ('DROP', None, 0.0))
+        self.assertEqual({k: stored[k] for k in ('base_arm', 'first_diff_from_base', 'generated_sha256')},
+                         {k: row[k] for k in ('base_arm', 'first_diff_from_base', 'generated_sha256')})
+        self.assertNotIn('error', stored)
+
+    def test_generated_turn_that_differs_from_the_base_arm_is_recorded_and_the_session_continues(self):
+        base_ids = [17] * 512
+        own_ids = [17] * 40 + [18] + [17] * 471
+        client = Mock()
+        client.request.side_effect = [{'token_ids': own_ids, 'delta': {'prefix_cache_hits': 32.0}}, {
+            'usage': {'prompt_tokens': 2048}, 'ttft_ms': 50.0,
+            'delta': {'request_success': 1, 'prefix_cache_hits': 0, 'external_prefix_cache_hits': 1776,
+                      'kv_offload_load_bytes': None}}]
+        generated = {'r0-n2048-s1': {'arm': 'DROP', 'sha256': 'base', 'ids': base_ids}}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(run.time, 'sleep'):
+            row = run.session(client, Mock(evict=Mock(return_value=1)), self.material(), 'LAZY', 80000,
+                              Path(tmp), generated)
+            stored = json.loads((Path(tmp) / 'sessions.jsonl').read_text())
+        # No failure: the resume request is sent, built from this arm's own ids.
+        self.assertEqual(client.request.call_count, 2)
+        self.assertEqual(client.request.call_args_list[1].args[0], [1] * 1280 + own_ids + [2] * 256)
+        self.assertEqual((row['base_arm'], row['first_diff_from_base'], row['turn1_prefix_cache_hits']),
+                         ('DROP', 40, 32.0))
+        self.assertNotEqual(row['generated_sha256'], 'base')
+        self.assertTrue(row['gates']['L'])
+        self.assertEqual(stored['first_diff_from_base'], 40)
+        self.assertNotIn('error', stored)
+        # The base arm stays the first one.
+        self.assertEqual(generated['r0-n2048-s1']['arm'], 'DROP')
+
+    def test_short_turn_one_has_no_base_and_fails_length(self):
+        client = Mock()
+        client.request.return_value = {'token_ids': [17] * 511, 'delta': {'prefix_cache_hits': 0.0}}
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(run.ArmFailure):
-                run.session(client, None, self.material(), 'LAZY', 80000, Path(tmp), {'r0-n2048-s1': 'other'})
-            row = json.loads((Path(tmp) / 'sessions.jsonl').read_text())
-            self.assertEqual(row['turn1']['token_ids'], [17] * 512)
-            self.assertEqual(row['expected_generated_sha256'], 'other')
-            self.assertEqual(client.request.call_count, 1)
+            row = run.session(client, None, self.material(), 'LAZY', 80000, Path(tmp), {})
+        self.assertFalse(row['gates']['L'])
+        self.assertNotIn('base_arm', row)
+        self.assertEqual(row['turn1_prefix_cache_hits'], 0.0)
+        self.assertEqual(client.request.call_count, 1)
 
 
 class Order(unittest.TestCase):
@@ -134,7 +176,7 @@ class ArmFailures(unittest.TestCase):
         def session(client, filler, material, arm, pool, directory, generated):
             calls.append(arm)
             if arm == 'DROP':
-                raise run.ArmFailure('Generated 512-token turn changed between arms')
+                raise run.ArmFailure('Warm-up failed the length check')
             return {'arm': arm, 'gates': {'L': True}}
         materials = [{'round': 0, 'N': 2048, 'index': i, 'warmup': i == 0} for i in range(5)]
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,7 +188,7 @@ class ArmFailures(unittest.TestCase):
             self.assertEqual(len(out[0]['sessions']), 5)
             self.assertEqual(calls.count('DROP'), 1)
             self.assertTrue(out[1]['starts']['LAZY']['pass'])
-            self.assertIn('Generated 512-token', (root / 'DEFAULT/failure.json').read_text())
+            self.assertIn('Warm-up failed', (root / 'DEFAULT/failure.json').read_text())
 
     def test_engine_crash_mid_round_keeps_other_arms(self):
         def session(client, filler, material, arm, pool, directory, generated):
