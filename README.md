@@ -222,6 +222,11 @@ placement, the listening socket, the default sampling parameters the server logg
 
 `trace` writes `histogram.json` (tool records per idle-context length) and `report.json`.
 
+`python scripts/restore_copy.py RUN/raw.json` prints, for the two offload configurations, the
+host-to-GPU copy time of the restored requests from the connector's own counters
+(`vllm:kv_offload_load_time_total`, `vllm:kv_offload_load_bytes_total`), the rate, and the time
+per copied block of one layer.
+
 `launch.json` records the server's environment with the values of secret-like variables
 replaced by `<redacted>` (names containing KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL or AUTH, and
 names starting with SSH_, in any case); the server itself receives the real values. The records
